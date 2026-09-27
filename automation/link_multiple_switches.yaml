@@ -1,0 +1,95 @@
+blueprint:
+  name: Link Multiple Switches - Fixed
+  description: >
+    Link multiple switches together v1.0.1 - Fixed
+
+    Select multiple switch entities to link their on/off state.
+    If any selected switch entity is turned on or off,
+    the other selected entities will be sent a matching
+    on or off command.
+
+    Fixed:
+    - Ignore unavailable state
+    - Ignore unknown state
+    - Only sync on/off states
+
+    Requires Home Assistant 2022.5.0 or newer.
+
+    Based on the original blueprint by aderusha:
+    https://gist.github.com/aderusha/4f25658dbb855675b5b5ccf296fd801b
+
+  domain: automation
+  source_url: https://github.com/PATCoder97/ha-blueprints/blob/main/automation/link_multiple_switches.yaml
+
+  homeassistant:
+    min_version: 2022.5.0
+
+  input:
+    switches:
+      name: Switch Entities
+      description: Select switches to synchronize
+      selector:
+        entity:
+          domain:
+            - switch
+          multiple: true
+          reorder: false
+
+mode: queued
+max_exceeded: silent
+
+variables:
+  switches: !input switches
+
+trigger:
+  - platform: state
+    entity_id: !input switches
+
+condition:
+
+  # Đảm bảo có trạng thái mới
+  - condition: template
+    value_template: >
+      {{ trigger.to_state is not none }}
+
+  # Đảm bảo có trạng thái trước đó
+  - condition: template
+    value_template: >
+      {{ trigger.from_state is not none }}
+
+  # CHỈ cho phép ON hoặc OFF
+  # unavailable / unknown sẽ bị bỏ qua
+  - condition: template
+    value_template: >
+      {{ trigger.to_state.state in ['on', 'off'] }}
+
+  # Chỉ chạy khi trạng thái thực sự thay đổi
+  - condition: template
+    value_template: >
+      {{ trigger.to_state.state != trigger.from_state.state }}
+
+  # Tránh các switch kích hoạt vòng lặp lẫn nhau
+  - condition: template
+    value_template: >
+      {{
+        trigger.to_state.context.parent_id is none
+        or
+        (
+          trigger.to_state.context.id != this.context.id
+          and
+          trigger.to_state.context.parent_id != this.context.id
+        )
+      }}
+
+action:
+
+  # Đồng bộ trạng thái sang tất cả switch còn lại
+  - service: "homeassistant.turn_{{ trigger.to_state.state }}"
+    target:
+      entity_id: >
+        {{
+          expand(switches)
+          | selectattr('entity_id', '!=', trigger.entity_id)
+          | map(attribute='entity_id')
+          | list
+        }}
