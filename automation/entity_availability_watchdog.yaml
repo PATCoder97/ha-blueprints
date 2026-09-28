@@ -1,0 +1,125 @@
+blueprint:
+  name: Theo dõi trạng thái khả dụng của thực thể
+  description: |
+    Theo dõi nhiều thực thể và chạy hành động tùy chỉnh khi một thực thể giữ
+    trạng thái `unknown` hoặc `unavailable` quá lâu. Khi thực thể hoạt động
+    trở lại, blueprint có thể chạy một nhóm hành động khôi phục riêng.
+
+    Các hành động có thể sử dụng những biến sau:
+    `watchdog_entity_id`, `watchdog_name`, `watchdog_state`,
+    `watchdog_title` và `watchdog_message`.
+  domain: automation
+  source_url: https://github.com/PATCoder97/ha-blueprints/blob/main/automation/entity_availability_watchdog.yaml
+  homeassistant:
+    min_version: 2024.10.0
+  input:
+    monitored_entities:
+      name: Các thực thể cần theo dõi
+      description: Chọn các thực thể cần giám sát trạng thái khả dụng.
+      selector:
+        entity:
+          multiple: true
+          reorder: false
+    unavailable_duration:
+      name: Thời gian mất kết nối
+      description: Khoảng thời gian thực thể phải lỗi liên tục trước khi cảnh báo.
+      default:
+        minutes: 5
+      selector:
+        duration: {}
+    repeat_notifications:
+      name: Lặp lại hành động cảnh báo
+      description: Tiếp tục chạy hành động cảnh báo khi thực thể vẫn chưa hoạt động.
+      default: false
+      selector:
+        boolean: {}
+    repeat_interval:
+      name: Khoảng cách giữa các lần nhắc
+      default:
+        minutes: 30
+      selector:
+        duration: {}
+    problem_actions:
+      name: Hành động khi có sự cố
+      description: Các hành động chạy khi thực thể mất kết nối quá lâu.
+      default: []
+      selector:
+        action: {}
+    recovery_actions:
+      name: Hành động khi phục hồi
+      description: Các hành động chạy khi thực thể đã cảnh báo hoạt động trở lại.
+      default: []
+      selector:
+        action: {}
+
+mode: parallel
+max: 20
+max_exceeded: warning
+
+variables:
+  repeat_enabled: !input repeat_notifications
+
+triggers:
+  - trigger: state
+    entity_id: !input monitored_entities
+    to: "unavailable"
+    for: !input unavailable_duration
+  - trigger: state
+    entity_id: !input monitored_entities
+    to: "unknown"
+    for: !input unavailable_duration
+
+actions:
+  - variables:
+      problem_state: "{{ trigger.to_state.state }}"
+      watchdog_entity_id: "{{ trigger.entity_id }}"
+      watchdog_name: >
+        {{ trigger.to_state.name | default(trigger.entity_id, true) }}
+      watchdog_state: "{{ trigger.to_state.state }}"
+      watchdog_title: Thực thể mất kết nối
+      watchdog_message: >
+        {{ trigger.to_state.name | default(trigger.entity_id, true) }}
+        đã ở trạng thái {{ trigger.to_state.state }} quá thời gian quy định.
+  - choose:
+      - conditions:
+          - condition: template
+            value_template: "{{ true }}"
+        sequence: !input problem_actions
+  - if:
+      - condition: template
+        value_template: "{{ repeat_enabled }}"
+    then:
+      - repeat:
+          sequence:
+            - wait_template: "{{ states(trigger.entity_id) != problem_state }}"
+              timeout: !input repeat_interval
+              continue_on_timeout: true
+            - if:
+                - condition: template
+                  value_template: >
+                    {{ states(trigger.entity_id) == problem_state }}
+              then:
+                - choose:
+                    - conditions:
+                        - condition: template
+                          value_template: "{{ true }}"
+                      sequence: !input problem_actions
+          until:
+            - condition: template
+              value_template: "{{ states(trigger.entity_id) != problem_state }}"
+    else:
+      - wait_template: "{{ states(trigger.entity_id) != problem_state }}"
+  - condition: template
+    value_template: >
+      {{ states(trigger.entity_id) not in ['unknown', 'unavailable'] }}
+  - variables:
+      watchdog_state: "{{ states(trigger.entity_id) }}"
+      watchdog_title: Thực thể đã phục hồi
+      watchdog_message: >
+        {{ watchdog_name }} đã hoạt động trở lại với trạng thái
+        {{ states(trigger.entity_id) }}.
+  - choose:
+      - conditions:
+          - condition: template
+            value_template: "{{ true }}"
+        sequence: !input recovery_actions

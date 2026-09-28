@@ -1,0 +1,142 @@
+blueprint:
+  name: Bảo vệ điều hòa khi mở cửa
+  description: |
+    Tắt các thiết bị điều hòa được chọn khi cửa ra vào hoặc cửa sổ mở quá lâu.
+    Sau khi tất cả cửa đã đóng ổn định, blueprint chỉ khôi phục những chế độ
+    HVAC mà chính nó đã thay đổi.
+
+    Thao tác thủ công luôn được tôn trọng: thiết bị chỉ được khôi phục nếu vẫn
+    đang tắt. Khoảng chờ đang chạy sẽ bị hủy nếu tải lại automation hoặc khởi
+    động lại Home Assistant.
+  domain: automation
+  source_url: https://github.com/PATCoder97/ha-blueprints/blob/main/automation/climate_window_guard.yaml
+  homeassistant:
+    min_version: 2024.10.0
+  input:
+    opening_sensors:
+      name: Cảm biến cửa ra vào và cửa sổ
+      selector:
+        entity:
+          filter:
+            - domain: binary_sensor
+              device_class:
+                - door
+                - garage_door
+                - opening
+                - window
+          multiple: true
+          reorder: false
+    climate_entities:
+      name: Các thiết bị điều hòa
+      selector:
+        entity:
+          filter:
+            - domain: climate
+          multiple: true
+          reorder: false
+    open_duration:
+      name: Thời gian cửa mở trước khi tắt điều hòa
+      default:
+        minutes: 2
+      selector:
+        duration: {}
+    closed_duration:
+      name: Thời gian cửa đóng trước khi khôi phục điều hòa
+      default:
+        minutes: 2
+      selector:
+        duration: {}
+    climate_off_actions:
+      name: Hành động sau khi tắt điều hòa
+      default: []
+      selector:
+        action: {}
+    climate_restored_actions:
+      name: Hành động sau khi khôi phục điều hòa
+      default: []
+      selector:
+        action: {}
+
+mode: single
+max_exceeded: silent
+
+variables:
+  openings: !input opening_sensors
+  climates: !input climate_entities
+
+triggers:
+  - trigger: state
+    entity_id: !input opening_sensors
+    to: "on"
+    for: !input open_duration
+
+actions:
+  - variables:
+      previous_climates: >
+        {% set saved = namespace(items=[]) %}
+        {% for climate in expand(climates) %}
+          {% if climate.state not in ['off', 'unknown', 'unavailable'] %}
+            {% set saved.items = saved.items + [
+              {'entity_id': climate.entity_id, 'hvac_mode': climate.state}
+            ] %}
+          {% endif %}
+        {% endfor %}
+        {{ saved.items }}
+  - condition: template
+    value_template: "{{ previous_climates | count > 0 }}"
+  - action: climate.turn_off
+    target:
+      entity_id: >
+        {{ previous_climates | map(attribute='entity_id') | list }}
+  - choose:
+      - conditions:
+          - condition: template
+            value_template: "{{ true }}"
+        sequence: !input climate_off_actions
+  - repeat:
+      sequence:
+        - wait_template: >
+            {{
+              expand(openings)
+              | rejectattr('state', 'eq', 'off')
+              | list
+              | count == 0
+            }}
+        - delay: !input closed_duration
+      until:
+        - condition: template
+          value_template: >
+            {{
+              expand(openings)
+              | rejectattr('state', 'eq', 'off')
+              | list
+              | count == 0
+            }}
+  - variables:
+      climates_to_restore: >
+        {% set saved = namespace(items=[]) %}
+        {% for climate in previous_climates %}
+          {% if is_state(climate.entity_id, 'off') %}
+            {% set saved.items = saved.items + [climate] %}
+          {% endif %}
+        {% endfor %}
+        {{ saved.items }}
+  - condition: template
+    value_template: "{{ climates_to_restore | count > 0 }}"
+  - repeat:
+      for_each: "{{ climates_to_restore }}"
+      sequence:
+        - if:
+            - condition: template
+              value_template: "{{ is_state(repeat.item.entity_id, 'off') }}"
+          then:
+            - action: climate.set_hvac_mode
+              target:
+                entity_id: "{{ repeat.item.entity_id }}"
+              data:
+                hvac_mode: "{{ repeat.item.hvac_mode }}"
+  - choose:
+      - conditions:
+          - condition: template
+            value_template: "{{ true }}"
+        sequence: !input climate_restored_actions

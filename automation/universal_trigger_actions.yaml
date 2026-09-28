@@ -1,0 +1,52 @@
+blueprint:
+  name: Kích hoạt hành động đa năng
+  description: |
+    Kết nối bất kỳ trình kích hoạt nào với các điều kiện và hành động tùy chỉnh
+    ngay trong trình chỉnh sửa trực quan. Thời gian chờ tùy chọn giúp ngăn hành
+    động bị chạy liên tục trong thời gian ngắn.
+
+    Blueprint này yêu cầu Home Assistant 2024.10 trở lên vì sử dụng danh sách
+    trình kích hoạt do người dùng cấu hình.
+  domain: automation
+  source_url: https://github.com/PATCoder97/ha-blueprints/blob/main/automation/universal_trigger_actions.yaml
+  homeassistant:
+    min_version: 2024.10.0
+  input:
+    user_triggers:
+      name: Trình kích hoạt
+      selector:
+        trigger: {}
+    user_conditions:
+      name: Điều kiện
+      description: Tất cả điều kiện được chọn phải đúng trước khi chạy hành động.
+      default: []
+      selector:
+        condition: {}
+    user_actions:
+      name: Hành động
+      default: []
+      selector:
+        action: {}
+    cooldown:
+      name: Thời gian chờ
+      description: Bỏ qua các lần kích hoạt tiếp theo trong khoảng thời gian này.
+      default:
+        seconds: 0
+      selector:
+        duration: {}
+
+mode: single
+max_exceeded: silent
+
+triggers:
+  - triggers: !input user_triggers
+
+conditions: !input user_conditions
+
+actions:
+  - choose:
+      - conditions:
+          - condition: template
+            value_template: "{{ true }}"
+        sequence: !input user_actions
+  - delay: !input cooldown

@@ -1,0 +1,117 @@
+blueprint:
+  name: Nhắc cửa ra vào và cửa sổ đang mở
+  description: |
+    Chạy hành động nhắc nhở khi cửa ra vào hoặc cửa sổ được chọn mở quá lâu.
+    Có thể lặp lại lời nhắc cho đến khi cửa đóng, sau đó chạy hành động xác nhận
+    đã xử lý.
+
+    Các hành động có thể sử dụng `opening_entity_id`, `opening_name`,
+    `opening_title` và `opening_message`.
+
+    Khoảng chờ đang chạy sẽ bị hủy nếu tải lại automation hoặc khởi động lại
+    Home Assistant.
+  domain: automation
+  source_url: https://github.com/PATCoder97/ha-blueprints/blob/main/automation/door_window_reminder.yaml
+  homeassistant:
+    min_version: 2024.10.0
+  input:
+    opening_sensors:
+      name: Cảm biến cửa ra vào và cửa sổ
+      selector:
+        entity:
+          filter:
+            - domain: binary_sensor
+              device_class:
+                - door
+                - garage_door
+                - opening
+                - window
+          multiple: true
+          reorder: false
+    open_duration:
+      name: Thời gian chờ trước lần nhắc đầu tiên
+      default:
+        minutes: 10
+      selector:
+        duration: {}
+    repeat_reminders:
+      name: Lặp lại lời nhắc
+      default: true
+      selector:
+        boolean: {}
+    repeat_interval:
+      name: Khoảng cách giữa các lần nhắc
+      default:
+        minutes: 15
+      selector:
+        duration: {}
+    reminder_actions:
+      name: Hành động nhắc nhở
+      default: []
+      selector:
+        action: {}
+    resolved_actions:
+      name: Hành động khi cửa đã đóng
+      description: Chạy sau khi cửa từng kích hoạt nhắc nhở đã đóng lại.
+      default: []
+      selector:
+        action: {}
+
+mode: parallel
+max: 20
+max_exceeded: warning
+
+variables:
+  repeat_enabled: !input repeat_reminders
+
+triggers:
+  - trigger: state
+    entity_id: !input opening_sensors
+    to: "on"
+    for: !input open_duration
+
+actions:
+  - variables:
+      opening_entity_id: "{{ trigger.entity_id }}"
+      opening_name: >
+        {{ trigger.to_state.name | default(trigger.entity_id, true) }}
+      opening_title: Cửa đang mở quá lâu
+      opening_message: >
+        {{ trigger.to_state.name | default(trigger.entity_id, true) }}
+        đã mở quá thời gian quy định.
+  - choose:
+      - conditions:
+          - condition: template
+            value_template: "{{ true }}"
+        sequence: !input reminder_actions
+  - if:
+      - condition: template
+        value_template: "{{ repeat_enabled }}"
+    then:
+      - repeat:
+          sequence:
+            - wait_template: "{{ is_state(trigger.entity_id, 'off') }}"
+              timeout: !input repeat_interval
+              continue_on_timeout: true
+            - if:
+                - condition: template
+                  value_template: "{{ is_state(trigger.entity_id, 'on') }}"
+              then:
+                - choose:
+                    - conditions:
+                        - condition: template
+                          value_template: "{{ true }}"
+                      sequence: !input reminder_actions
+          until:
+            - condition: template
+              value_template: "{{ is_state(trigger.entity_id, 'off') }}"
+    else:
+      - wait_template: "{{ is_state(trigger.entity_id, 'off') }}"
+  - variables:
+      opening_title: Cửa đã đóng
+      opening_message: "{{ opening_name }} đã được đóng lại."
+  - choose:
+      - conditions:
+          - condition: template
+            value_template: "{{ true }}"
+        sequence: !input resolved_actions

@@ -1,0 +1,108 @@
+blueprint:
+  name: Theo dõi chu trình thiết bị
+  description: |
+    Phát hiện chu trình hoạt động của thiết bị qua cảm biến công suất. Chu trình
+    bắt đầu khi công suất duy trì trên ngưỡng khởi động và kết thúc khi công
+    suất duy trì dưới ngưỡng hoàn tất.
+
+    Các hành động có thể sử dụng `appliance_name`, `appliance_power`,
+    `appliance_title` và `appliance_message`.
+
+    Khoảng chờ đang chạy sẽ bị hủy nếu tải lại automation hoặc khởi động lại
+    Home Assistant.
+  domain: automation
+  source_url: https://github.com/PATCoder97/ha-blueprints/blob/main/automation/appliance_cycle_monitor.yaml
+  homeassistant:
+    min_version: 2024.10.0
+  input:
+    power_sensor:
+      name: Cảm biến công suất
+      selector:
+        entity:
+          filter:
+            - domain: sensor
+              device_class: power
+    start_power:
+      name: Ngưỡng công suất bắt đầu
+      description: Chu trình bắt đầu khi công suất duy trì trên giá trị này.
+      default: 10
+      selector:
+        number:
+          min: 0
+          max: 10000
+          step: 0.1
+          unit_of_measurement: W
+          mode: box
+    start_duration:
+      name: Thời gian xác nhận bắt đầu
+      default:
+        minutes: 1
+      selector:
+        duration: {}
+    finish_power:
+      name: Ngưỡng công suất hoàn tất
+      description: Giá trị này nên thấp hơn ngưỡng công suất bắt đầu.
+      default: 3
+      selector:
+        number:
+          min: 0
+          max: 10000
+          step: 0.1
+          unit_of_measurement: W
+          mode: box
+    finish_duration:
+      name: Thời gian xác nhận hoàn tất
+      default:
+        minutes: 3
+      selector:
+        duration: {}
+    started_actions:
+      name: Hành động khi chu trình bắt đầu
+      default: []
+      selector:
+        action: {}
+    finished_actions:
+      name: Hành động khi chu trình hoàn tất
+      default: []
+      selector:
+        action: {}
+
+mode: restart
+
+triggers:
+  - trigger: numeric_state
+    entity_id: !input power_sensor
+    above: !input start_power
+    for: !input start_duration
+
+actions:
+  - variables:
+      appliance_name: >
+        {{ trigger.to_state.name | default(trigger.entity_id, true) }}
+      appliance_power: "{{ trigger.to_state.state }}"
+      appliance_title: Thiết bị đã bắt đầu chu trình
+      appliance_message: >
+        {{ trigger.to_state.name | default(trigger.entity_id, true) }}
+        đã bắt đầu chu trình ở mức công suất {{ trigger.to_state.state }} W.
+  - choose:
+      - conditions:
+          - condition: template
+            value_template: "{{ true }}"
+        sequence: !input started_actions
+  - wait_for_trigger:
+      - trigger: numeric_state
+        entity_id: !input power_sensor
+        below: !input finish_power
+        for: !input finish_duration
+  - variables:
+      appliance_power: "{{ wait.trigger.to_state.state }}"
+      appliance_title: Thiết bị đã hoàn tất chu trình
+      appliance_message: >
+        {{ wait.trigger.to_state.name | default(wait.trigger.entity_id, true) }}
+        đã hoàn tất chu trình ở mức công suất
+        {{ wait.trigger.to_state.state }} W.
+  - choose:
+      - conditions:
+          - condition: template
+            value_template: "{{ true }}"
+        sequence: !input finished_actions

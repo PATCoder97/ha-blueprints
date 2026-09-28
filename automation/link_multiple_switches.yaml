@@ -1,15 +1,16 @@
 blueprint:
-  name: Synchronize Multiple Switches
+  name: Đồng bộ nhiều công tắc
   description: |
-    Keep the on/off state of multiple switch entities synchronized.
-    When one selected switch changes state, all selected switches that
-    are currently in the opposite state receive the matching command.
+    Giữ trạng thái bật/tắt của nhiều công tắc luôn đồng bộ với nhau.
+    Khi một công tắc được chọn thay đổi trạng thái, các công tắc đang ở
+    trạng thái ngược lại sẽ nhận lệnh bật hoặc tắt tương ứng.
 
-    Unknown and unavailable states are ignored as both triggers and targets.
+    Các trạng thái `unknown` và `unavailable` sẽ được bỏ qua, không dùng làm
+    nguồn kích hoạt hoặc mục tiêu điều khiển.
 
-    Requires Home Assistant 2022.5.0 or newer.
+    Yêu cầu Home Assistant 2022.5.0 trở lên.
 
-    Based on the original blueprint by aderusha:
+    Phát triển dựa trên blueprint gốc của aderusha:
     https://gist.github.com/aderusha/4f25658dbb855675b5b5ccf296fd801b
 
   domain: automation
@@ -20,8 +21,8 @@ blueprint:
 
   input:
     switches:
-      name: Switch Entities
-      description: Select switches to synchronize
+      name: Các công tắc
+      description: Chọn các công tắc cần đồng bộ trạng thái.
       selector:
         entity:
           domain:
@@ -40,29 +41,29 @@ trigger:
     entity_id: !input switches
 
 condition:
-  # Ignore state-change events without a new state.
+  # Bỏ qua sự kiện không có trạng thái mới.
   - condition: template
     value_template: >
       {{ trigger.to_state is not none }}
 
-  # Do not synchronize an entity's initial state registration.
+  # Không đồng bộ khi thực thể vừa đăng ký trạng thái ban đầu.
   - condition: template
     value_template: >
       {{ trigger.from_state is not none }}
 
-  # Ignore unknown, unavailable, and other non-binary states.
+  # Bỏ qua unknown, unavailable và các trạng thái khác bật/tắt.
   - condition: template
     value_template: >
       {{ trigger.to_state.state in ['on', 'off'] }}
 
-  # Ignore attribute-only updates.
+  # Bỏ qua thay đổi chỉ liên quan đến thuộc tính.
   - condition: template
     value_template: >
       {{ trigger.to_state.state != trigger.from_state.state }}
 
 action:
-  # Target only switches that are currently in the opposite state.
-  # This excludes unknown/unavailable switches and stops sync loops naturally.
+  # Chỉ điều khiển công tắc đang ở trạng thái ngược lại.
+  # Cách này loại bỏ công tắc lỗi và tự ngăn vòng lặp đồng bộ.
   - variables:
       target_switches: >
         {{
@@ -76,7 +77,7 @@ action:
           | list
         }}
 
-  # A queued run may no longer have any work after an earlier run finishes.
+  # Lượt chờ trong hàng đợi có thể không còn việc sau khi lượt trước hoàn tất.
   - condition: template
     value_template: >
       {{ target_switches | count > 0 }}

@@ -1,0 +1,112 @@
+blueprint:
+  name: Điều khiển đèn theo hiện diện
+  description: |
+    Bật các đèn được chọn khi phát hiện có người và ánh sáng môi trường thấp.
+    Những đèn đã bật từ trước sẽ không bị blueprint quản lý hoặc tự động tắt.
+
+    Nếu người dùng tắt thủ công một đèn đang được quản lý khi phòng vẫn có
+    người, automation sẽ không tự bật lại. Đèn chỉ được tắt sau khi cảm biến
+    không còn phát hiện hiện diện trong khoảng thời gian đã cấu hình.
+  domain: automation
+  source_url: https://github.com/PATCoder97/ha-blueprints/blob/main/automation/presence_lighting_manual_override.yaml
+  homeassistant:
+    min_version: 2024.10.0
+  input:
+    presence_sensor:
+      name: Cảm biến hiện diện hoặc chuyển động
+      selector:
+        entity:
+          filter:
+            - domain: binary_sensor
+              device_class:
+                - motion
+                - occupancy
+    illuminance_sensor:
+      name: Cảm biến độ sáng
+      selector:
+        entity:
+          filter:
+            - domain: sensor
+              device_class: illuminance
+    lights:
+      name: Các đèn cần điều khiển
+      selector:
+        entity:
+          filter:
+            - domain: light
+          multiple: true
+          reorder: false
+    maximum_illuminance:
+      name: Độ sáng tối đa
+      description: Không bật đèn khi độ sáng bằng hoặc cao hơn giá trị này.
+      default: 100
+      selector:
+        number:
+          min: 0
+          max: 100000
+          step: 1
+          unit_of_measurement: lx
+          mode: box
+    brightness:
+      name: Độ sáng của đèn
+      default: 100
+      selector:
+        number:
+          min: 1
+          max: 100
+          step: 1
+          unit_of_measurement: "%"
+          mode: slider
+    clear_duration:
+      name: Thời gian không có người trước khi tắt đèn
+      default:
+        minutes: 2
+      selector:
+        duration: {}
+
+mode: single
+max_exceeded: silent
+
+variables:
+  presence_entity: !input presence_sensor
+  illuminance_entity: !input illuminance_sensor
+  selected_lights: !input lights
+  illuminance_limit: !input maximum_illuminance
+  brightness_percent: !input brightness
+
+triggers:
+  - trigger: state
+    entity_id: !input presence_sensor
+    to: "on"
+
+conditions:
+  - condition: template
+    value_template: >
+      {{ states(illuminance_entity) | float(999999) < illuminance_limit | float }}
+
+actions:
+  - variables:
+      managed_lights: >
+        {{
+          expand(selected_lights)
+          | selectattr('state', 'eq', 'off')
+          | map(attribute='entity_id')
+          | list
+        }}
+  - condition: template
+    value_template: "{{ managed_lights | count > 0 }}"
+  - action: light.turn_on
+    target:
+      entity_id: "{{ managed_lights }}"
+    data:
+      brightness_pct: "{{ brightness_percent }}"
+  - repeat:
+      sequence:
+        - wait_template: "{{ is_state(presence_entity, 'off') }}"
+        - delay: !input clear_duration
+      until:
+        - condition: template
+          value_template: "{{ is_state(presence_entity, 'off') }}"
+  - action: light.turn_off
+    target:
+      entity_id: "{{ managed_lights }}"
